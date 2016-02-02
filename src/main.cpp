@@ -32,6 +32,7 @@ int main(int argc, char** argv)
 #ifdef QT_NO_DEBUG
     Tools::disableCoreDumps();
 #endif
+    Tools::setupSearchPaths();
 
     Application app(argc, argv);
     Application::setApplicationName("keepassx");
@@ -57,9 +58,6 @@ int main(int argc, char** argv)
     QCommandLineOption configOption("config",
                                     QCoreApplication::translate("main", "path to a custom config file"),
                                     "config");
-    QCommandLineOption passwordOption("password",
-                                      QCoreApplication::translate("main", "password of the database (DANGEROUS!)"),
-                                      "password");
     QCommandLineOption keyfileOption("keyfile",
                                      QCoreApplication::translate("main", "key file of the database"),
                                      "keyfile");
@@ -67,7 +65,6 @@ int main(int argc, char** argv)
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addOption(configOption);
-    parser.addOption(passwordOption);
     parser.addOption(keyfileOption);
 
     parser.process(app);
@@ -86,13 +83,14 @@ int main(int argc, char** argv)
 
     MainWindow mainWindow;
     mainWindow.show();
+    app.setMainWindow(&mainWindow);
 
     QObject::connect(&app, SIGNAL(openFile(QString)), &mainWindow, SLOT(openDatabase(QString)));
 
     if (!args.isEmpty()) {
         QString filename = args[0];
         if (!filename.isEmpty() && QFile::exists(filename)) {
-            mainWindow.openDatabase(filename, parser.value(passwordOption), parser.value(keyfileOption));
+            mainWindow.openDatabase(filename, QString(), parser.value(keyfileOption));
         }
     }
 

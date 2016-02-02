@@ -17,6 +17,17 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 
 configure_file(config-keepassx.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/config-keepassx.h)
 
+include(GetGitRevisionDescription)
+get_git_head_revision(GIT_REFSPEC GIT_HEAD)
+git_describe(GIT_DESCRIBE --long)
+
+if (NOT GIT_HEAD OR NOT GIT_DESCRIBE)
+    set(GIT_HEAD "")
+    set(GIT_DESCRIBE "")
+endif()
+
+configure_file(version.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/version.h @ONLY)
+
 set(keepassx_SOURCES
     autotype/AutoType.cpp
     autotype/AutoTypeAction.cpp
@@ -61,11 +72,13 @@ set(keepassx_SOURCES
     crypto/SymmetricCipher.cpp
     crypto/SymmetricCipherBackend.h
     crypto/SymmetricCipherGcrypt.cpp
+    format/CsvExporter.cpp
     format/KeePass1.h
     format/KeePass1Reader.cpp
     format/KeePass2.h
     format/KeePass2RandomStream.cpp
     format/KeePass2Reader.cpp
+    format/KeePass2Repair.cpp
     format/KeePass2Writer.cpp
     format/KeePass2XmlReader.cpp
     format/KeePass2XmlWriter.cpp
@@ -74,6 +87,7 @@ set(keepassx_SOURCES
     gui/ChangeMasterKeyWidget.cpp
     gui/Clipboard.cpp
     gui/DatabaseOpenWidget.cpp
+    gui/DatabaseRepairWidget.cpp
     gui/DatabaseSettingsWidget.cpp
     gui/DatabaseTabWidget.cpp
     gui/DatabaseWidget.cpp
@@ -176,6 +190,7 @@ set(keepassx_MOC
     gui/ChangeMasterKeyWidget.h
     gui/Clipboard.h
     gui/DatabaseOpenWidget.h
+    gui/DatabaseRepairWidget.h
     gui/DatabaseSettingsWidget.h
     gui/DatabaseTabWidget.h
     gui/DatabaseWidget.h
@@ -267,10 +282,6 @@ target_link_libraries(${PROGNAME}
                       ${QT_QTNETWORK_LIBRARY}
                       ${GCRYPT_LIBRARIES}
                       ${ZLIB_LIBRARIES})
-
-if(UNIX AND NOT APPLE)
-  target_link_libraries(${PROGNAME} ${QT_QTDBUS_LIBRARY})
-endif()
 
 set_target_properties(${PROGNAME} PROPERTIES ENABLE_EXPORTS ON)
 

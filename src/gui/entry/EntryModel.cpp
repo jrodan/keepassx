@@ -146,7 +146,7 @@ QVariant EntryModel::data(const QModelIndex& index, int role) const
         switch (index.column()) {
         case ParentGroup:
             if (entry->group()) {
-                return entry->group()->iconPixmap();
+                return entry->group()->iconScaledPixmap();
             }
             break;
         case Title:
@@ -154,7 +154,7 @@ QVariant EntryModel::data(const QModelIndex& index, int role) const
                 return databaseIcons()->iconPixmap(DatabaseIcons::ExpiredIconIndex);
             }
             else {
-                return entry->iconPixmap();
+                return entry->iconScaledPixmap();
             }
         }
     }
@@ -239,7 +239,7 @@ QMimeData* EntryModel::mimeData(const QModelIndexList& indexes) const
         return Q_NULLPTR;
     }
     else {
-        data->setData(mimeTypes().first(), encoded);
+        data->setData(mimeTypes().at(0), encoded);
         return data;
     }
 }

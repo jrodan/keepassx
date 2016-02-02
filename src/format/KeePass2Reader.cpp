@@ -24,6 +24,7 @@
 #include "core/Database.h"
 #include "core/Endian.h"
 #include "crypto/CryptoHash.h"
+#include "format/KeePass1.h"
 #include "format/KeePass2.h"
 #include "format/KeePass2RandomStream.h"
 #include "format/KeePass2XmlReader.h"
@@ -42,7 +43,7 @@ KeePass2Reader::KeePass2Reader()
 {
 }
 
-Database* KeePass2Reader::readDatabase(QIODevice* device, const CompositeKey& key)
+Database* KeePass2Reader::readDatabase(QIODevice* device, const CompositeKey& key, bool keepDatabase)
 {
     QScopedPointer<Database> db(new Database());
     m_db = db.data();
@@ -70,7 +71,14 @@ Database* KeePass2Reader::readDatabase(QIODevice* device, const CompositeKey& ke
     }
 
     quint32 signature2 = Endian::readUInt32(m_headerStream, KeePass2::BYTEORDER, &ok);
-    if (!ok || signature2 != KeePass2::SIGNATURE_2) {
+    if (ok && signature2 == KeePass1::SIGNATURE_2) {
+        raiseError(tr("The selected file is an old KeePass 1 database (.kdb).\n\n"
+                      "You can import it by clicking on Database > 'Import KeePass 1 database'.\n"
+                      "This is a one-way migration. You won't be able to open the imported "
+                      "database with the old KeePassX 0.4 version."));
+        return Q_NULLPTR;
+    }
+    else if (!ok || signature2 != KeePass2::SIGNATURE_2) {
         raiseError(tr("Not a KeePass database."));
         return Q_NULLPTR;
     }
@@ -170,7 +178,12 @@ Database* KeePass2Reader::readDatabase(QIODevice* device, const CompositeKey& ke
 
     if (xmlReader.hasError()) {
         raiseError(xmlReader.errorString());
-        return Q_NULLPTR;
+        if (keepDatabase) {
+            return db.take();
+        }
+        else {
+            return Q_NULLPTR;
+        }
     }
 
     Q_ASSERT(version < 0x00030001 || !xmlReader.headerHash().isEmpty());
@@ -222,6 +235,11 @@ void KeePass2Reader::setSaveXml(bool save)
 QByteArray KeePass2Reader::xmlData()
 {
     return m_xmlData;
+}
+
+QByteArray KeePass2Reader::streamKey()
+{
+    return m_protectedStreamKey;
 }
 
 void KeePass2Reader::raiseError(const QString& errorMessage)

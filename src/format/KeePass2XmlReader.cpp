@@ -357,7 +357,7 @@ void KeePass2XmlReader::parseIcon()
     while (!m_xml.error() && m_xml.readNextStartElement()) {
         if (m_xml.name() == "UUID") {
             uuid = readUuid();
-            uuidSet = true;
+            uuidSet = !uuid.isNull();
         }
         else if (m_xml.name() == "Data") {
             icon.loadFromData(readBinary());
@@ -523,6 +523,7 @@ Group* KeePass2XmlReader::parseGroup()
                 if (m_strictMode) {
                     raiseError("Invalid group icon number");
                 }
+                iconId = 0;
             }
             else {
                 if (iconId >= DatabaseIcons::IconCount) {
@@ -702,6 +703,7 @@ Entry* KeePass2XmlReader::parseEntry(bool history)
                 if (m_strictMode) {
                     raiseError("Invalid entry icon number");
                 }
+                iconId = 0;
             }
             else {
                 entry->setIcon(iconId);
@@ -1104,7 +1106,10 @@ int KeePass2XmlReader::readNumber()
 Uuid KeePass2XmlReader::readUuid()
 {
     QByteArray uuidBin = readBinary();
-    if (uuidBin.length() != Uuid::Length) {
+    if (uuidBin.isEmpty()) {
+        return Uuid();
+    }
+    else if (uuidBin.length() != Uuid::Length) {
         if (m_strictMode) {
             raiseError("Invalid uuid value");
         }

@@ -20,14 +20,19 @@
 
 #include <QCloseEvent>
 #include <QShortcut>
+#include <QTimer>
 
 #include "autotype/AutoType.h"
 #include "core/Config.h"
 #include "core/FilePath.h"
 #include "core/InactivityTimer.h"
 #include "core/Metadata.h"
+#include "format/KeePass2Writer.h"
 #include "gui/AboutDialog.h"
 #include "gui/DatabaseWidget.h"
+#include "gui/DatabaseRepairWidget.h"
+#include "gui/FileDialog.h"
+#include "gui/MessageBox.h"
 
 #include "http/Service.h"
 #include "http/HttpSettings.h"
@@ -109,7 +114,7 @@ MainWindow::MainWindow()
 
     m_inactivityTimer = new InactivityTimer(this);
     connect(m_inactivityTimer, SIGNAL(inactivityDetected()),
-            m_ui->tabWidget, SLOT(lockDatabases()));
+            this, SLOT(lockDatabasesAfterInactivity()));
     applySettingsChanges();
 
     setShortcut(m_ui->actionDatabaseOpen, QKeySequence::Open, Qt::CTRL + Qt::Key_O);
@@ -127,10 +132,9 @@ MainWindow::MainWindow()
     m_ui->actionEntryCopyPassword->setShortcut(Qt::CTRL + Qt::Key_C);
     setShortcut(m_ui->actionEntryAutoType, QKeySequence::Paste, Qt::CTRL + Qt::Key_V);
     m_ui->actionEntryOpenUrl->setShortcut(Qt::CTRL + Qt::Key_U);
+    m_ui->actionEntryCopyURL->setShortcut(Qt::CTRL + Qt::ALT + Qt::Key_U);
 
-#ifdef Q_OS_MAC
     new QShortcut(Qt::CTRL + Qt::Key_M, this, SLOT(showMinimized()));
-#endif
 
     m_ui->actionDatabaseNew->setIcon(filePath()->icon("actions", "document-new"));
     m_ui->actionDatabaseOpen->setIcon(filePath()->icon("actions", "document-open"));
@@ -200,6 +204,10 @@ MainWindow::MainWindow()
             SLOT(changeDatabaseSettings()));
     connect(m_ui->actionImportKeePass1, SIGNAL(triggered()), m_ui->tabWidget,
             SLOT(importKeePass1Database()));
+    connect(m_ui->actionRepairDatabase, SIGNAL(triggered()), this,
+            SLOT(repairDatabase()));
+    connect(m_ui->actionExportCsv, SIGNAL(triggered()), m_ui->tabWidget,
+            SLOT(exportToCsv()));
     connect(m_ui->actionLockDatabases, SIGNAL(triggered()), m_ui->tabWidget,
             SLOT(lockDatabases()));
     connect(m_ui->actionQuit, SIGNAL(triggered()), SLOT(close()));
@@ -340,6 +348,7 @@ void MainWindow::setMenuActionState(DatabaseWidget::Mode mode)
             m_ui->actionChangeDatabaseSettings->setEnabled(true);
             m_ui->actionDatabaseSave->setEnabled(true);
             m_ui->actionDatabaseSaveAs->setEnabled(true);
+            m_ui->actionExportCsv->setEnabled(true);
             break;
         }
         case DatabaseWidget::EditMode:
@@ -363,6 +372,7 @@ void MainWindow::setMenuActionState(DatabaseWidget::Mode mode)
             m_ui->actionChangeDatabaseSettings->setEnabled(false);
             m_ui->actionDatabaseSave->setEnabled(false);
             m_ui->actionDatabaseSaveAs->setEnabled(false);
+            m_ui->actionExportCsv->setEnabled(false);
             break;
         default:
             Q_ASSERT(false);
@@ -391,6 +401,7 @@ void MainWindow::setMenuActionState(DatabaseWidget::Mode mode)
         m_ui->actionDatabaseSaveAs->setEnabled(false);
 
         m_ui->actionDatabaseClose->setEnabled(false);
+        m_ui->actionExportCsv->setEnabled(false);
     }
 
     bool inDatabaseTabWidgetOrWelcomeWidget = inDatabaseTabWidget || inWelcomeWidget;
@@ -398,6 +409,7 @@ void MainWindow::setMenuActionState(DatabaseWidget::Mode mode)
     m_ui->actionDatabaseOpen->setEnabled(inDatabaseTabWidgetOrWelcomeWidget);
     m_ui->menuRecentDatabases->setEnabled(inDatabaseTabWidgetOrWelcomeWidget);
     m_ui->actionImportKeePass1->setEnabled(inDatabaseTabWidgetOrWelcomeWidget);
+    m_ui->actionRepairDatabase->setEnabled(inDatabaseTabWidgetOrWelcomeWidget);
 
     m_ui->actionLockDatabases->setEnabled(m_ui->tabWidget->hasLockableDatabases());
 }
@@ -478,10 +490,11 @@ void MainWindow::closeEvent(QCloseEvent* event)
 void MainWindow::changeEvent(QEvent *event)
 {
     if ((event->type() == QEvent::WindowStateChange) && isMinimized()
-            && isTrayIconEnabled() && config()->get("GUI/MinimizeToTray").toBool())
+            && isTrayIconEnabled() && m_trayIcon && m_trayIcon->isVisible()
+            && config()->get("GUI/MinimizeToTray").toBool())
     {
         event->ignore();
-        hide();
+        QTimer::singleShot(0, this, SLOT(hide()));
     }
     else {
         QMainWindow::changeEvent(event);
@@ -543,6 +556,7 @@ void MainWindow::updateTrayIcon()
     }
     else {
         if (m_trayIcon) {
+            m_trayIcon->hide();
             delete m_trayIcon;
             m_trayIcon = Q_NULLPTR;
         }
@@ -606,18 +620,65 @@ void MainWindow::trayIconTriggered(QSystemTrayIcon::ActivationReason reason)
 
 void MainWindow::toggleWindow()
 {
-    if (QApplication::activeWindow() == this) {
+    if ((QApplication::activeWindow() == this) && isVisible() && !isMinimized()) {
         hide();
     }
     else {
+        ensurePolished();
+        setWindowState(windowState() & ~Qt::WindowMinimized);
         show();
         raise();
         activateWindow();
     }
 }
 
+void MainWindow::lockDatabasesAfterInactivity()
+{
+    // ignore event if a modal dialog is open (such as a message box or file dialog)
+    if (QApplication::activeModalWidget()) {
+        return;
+    }
+
+    m_ui->tabWidget->lockDatabases();
+}
+
+void MainWindow::repairDatabase()
+{
+    QString filter = QString("%1 (*.kdbx);;%2 (*)").arg(tr("KeePass 2 Database"), tr("All files"));
+    QString fileName = fileDialog()->getOpenFileName(this, tr("Open database"), QString(),
+                                                     filter);
+    if (fileName.isEmpty()) {
+        return;
+    }
+
+    QScopedPointer<QDialog> dialog(new QDialog(this));
+    DatabaseRepairWidget* dbRepairWidget = new DatabaseRepairWidget(dialog.data());
+    connect(dbRepairWidget, SIGNAL(success()), dialog.data(), SLOT(accept()));
+    connect(dbRepairWidget, SIGNAL(error()), dialog.data(), SLOT(reject()));
+    dbRepairWidget->load(fileName);
+    if (dialog->exec() == QDialog::Accepted && dbRepairWidget->database()) {
+        QString saveFileName = fileDialog()->getSaveFileName(this, tr("Save repaired database"), QString(),
+                                                             tr("KeePass 2 Database").append(" (*.kdbx)"),
+                                                             Q_NULLPTR, 0, "kdbx");
+
+        if (!saveFileName.isEmpty()) {
+            KeePass2Writer writer;
+            writer.writeDatabase(saveFileName, dbRepairWidget->database());
+            if (writer.hasError()) {
+                MessageBox::critical(this, tr("Error"), tr("Writing the database failed.") + "\n\n"
+                                     + writer.errorString());
+            }
+        }
+    }
+}
+
 bool MainWindow::isTrayIconEnabled() const
 {
+#ifdef Q_OS_MAC
+    // systray not useful on OS X
+    return false;
+#else
     return config()->get("GUI/ShowTrayIcon").toBool()
             && QSystemTrayIcon::isSystemTrayAvailable();
+#endif
 }

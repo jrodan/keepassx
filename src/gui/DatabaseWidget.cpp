@@ -23,8 +23,10 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QKeyEvent>
 #include <QSplitter>
 #include <QTimer>
+#include <QProcess>
 
 #include "autotype/AutoType.h"
 #include "core/Config.h"
@@ -87,6 +89,7 @@ DatabaseWidget::DatabaseWidget(Database* db, QWidget* parent)
     m_searchUi->closeSearchButton->setShortcut(Qt::Key_Escape);
     m_searchWidget->hide();
     m_searchUi->caseSensitiveCheckBox->setVisible(false);
+    m_searchUi->searchEdit->installEventFilter(this);
 
     QVBoxLayout* vLayout = new QVBoxLayout(rightHandSideWidget);
     vLayout->setMargin(0);
@@ -452,8 +455,19 @@ void DatabaseWidget::openUrl()
 
 void DatabaseWidget::openUrlForEntry(Entry* entry)
 {
-    if (!entry->url().isEmpty()) {
-        QDesktopServices::openUrl(entry->url());
+    QString urlString = entry->resolvePlaceholders(entry->url());
+    if (urlString.isEmpty()) {
+        return;
+    }
+
+    if (urlString.startsWith("cmd://")) {
+        if (urlString.length() > 6) {
+            QProcess::startDetached(urlString.mid(6));
+        }
+    }
+    else {
+        QUrl url = QUrl::fromUserInput(urlString);
+        QDesktopServices::openUrl(url);
     }
 }
 
@@ -877,8 +891,17 @@ void DatabaseWidget::clearLastGroup(Group* group)
 void DatabaseWidget::lock()
 {
     Q_ASSERT(currentMode() != DatabaseWidget::LockedMode);
+    if (isInSearchMode()) {
+        closeSearch();
+    }
 
-    m_groupBeforeLock = m_groupView->currentGroup()->uuid();
+    if (m_groupView->currentGroup()) {
+        m_groupBeforeLock = m_groupView->currentGroup()->uuid();
+    }
+    else {
+        m_groupBeforeLock = m_db->rootGroup()->uuid();
+    }
+
     clearAllWidgets();
     m_unlockDatabaseWidget->load(m_filename);
     setCurrentWidget(m_unlockDatabaseWidget);
@@ -960,4 +983,35 @@ bool DatabaseWidget::currentEntryHasNotes()
         return false;
     }
     return !currentEntry->notes().isEmpty();
+}
+
+bool DatabaseWidget::eventFilter(QObject* object, QEvent* event)
+{
+    if (object == m_searchUi->searchEdit) {
+        if (event->type() == QEvent::KeyPress) {
+            QKeyEvent* keyEvent = static_cast<QKeyEvent*>(event);
+
+            if (keyEvent->matches(QKeySequence::Copy)) {
+                // If Control+C is pressed in the search edit when no
+                // text is selected, copy the password of the current
+                // entry.
+                Entry* currentEntry = m_entryView->currentEntry();
+                if (currentEntry && !m_searchUi->searchEdit->hasSelectedText()) {
+                    setClipboardTextAndMinimize(currentEntry->password());
+                    return true;
+                }
+            }
+            else if (keyEvent->matches(QKeySequence::MoveToNextLine)) {
+                // If Down is pressed at EOL in the search edit, move
+                // the focus to the entry view.
+                if (!m_searchUi->searchEdit->hasSelectedText()
+                        && m_searchUi->searchEdit->cursorPosition() == m_searchUi->searchEdit->text().size()) {
+                    m_entryView->setFocus();
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
 }
